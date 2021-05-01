@@ -32,6 +32,13 @@ When the application exits, `close()` ensures all buffered events are written. T
 
 When logging from a browser, and the application is being navigated away or closed, a `pagehide` or `unload` event listener has limited options and asynchronous methods will usually not succeed.  In that case, the application can call `flushToBeacon()` to queue all remaining buffered events into [`navigator.sendBeacon()`](https://developer.mozilla.org/docs/Web/API/Navigator/sendBeacon).  There is a size limit imposed by browsers so this is a best-effort attempt.
 
+### The enhancement features keep alive `http.Agent`. Support `http` and `https`.
+
+A `Logger` is configured by default to use custom [agentkeepalive](https://github.com/node-modules/agentkeepalive) library for optimized sockets utilization. Supports externally define set of configurable options to set on the agent
+according to [Node.js interface](https://github.com/nodejs/node/blob/master/doc/api/http.md#http_new_agent_options).
+
+When field `useKeepAliveAgent` is set to false, a `Logger` will fallback to use default Node.js agent, default: true.
+
 ### Implementations
 
  * [bunyan-seq](https://github.com/datalust/bunyan-seq) - collect events from the Buyan logging framework
