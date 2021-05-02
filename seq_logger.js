@@ -3,6 +3,8 @@
 let http = require('http');
 let https = require('https');
 let url = require('url');
+const HttpAgent = require('agentkeepalive');
+const HttpsAgent = require('agentkeepalive').HttpsAgent;
 
 const LEVELS = {
     "Verbose": "Verbose",
@@ -17,36 +19,70 @@ const HEADER = "{Events:[";
 const FOOTER = "]}";
 const HEADER_FOOTER_BYTES = Buffer.byteLength(HEADER, 'utf8') + Buffer.byteLength(FOOTER, 'utf8');
 
-
 class SeqLogger {
     constructor(config) {
         let dflt = {
-            serverUrl: 'http://localhost:5341', 
+            serverUrl: 'http://localhost:5341',
             apiKey: null,
             maxBatchingTime: 2000,
             eventSizeLimit: 256 * 1024,
             batchSizeLimit: 1024 * 1024,
             requestTimeout: 30000,
+            // Maximum number of sockets to allow per host. If the same host opens multiple concurrent connections,
+            // each request will use new socket until the maxSockets value is reached.
+            maxSockets:  Infinity,
+            maxFreeSockets:  256,//Maximum number of sockets to leave open in a free state
+            keepAliveMsecs: 1000, // When using the keepAlive option, specifies the initial delay for TCP Keep-Alive packets.
+            timeout: 60000, // Socket timeout in milliseconds. This will set the timeout when the socket is created
+            freeSocketTimeout: 30000, // free socket keepalive for 30 seconds,
+            maxCachedSessions: 100, // maximum number of TLS cached sessions. Use 0 to disable TLS session caching
+            maxTotalSockets: Infinity,//Maximum number of sockets allowed for all hosts in total,
+            useKeepAliveAgent: true,
             onError: e => { console.error("[seq]", e); }
         };
-        let cfg = config || dflt;
-        var serverUrl = cfg.serverUrl || dflt.serverUrl;
+        Object.freeze(dflt);
+        let cfg = Object.assign(Object.assign({}, dflt),config);
+
+        let serverUrl = cfg.serverUrl;
         if (!serverUrl.endsWith('/')) {
             serverUrl += '/';
         }
         this._endpoint = url.parse(serverUrl + 'api/events/raw');
-        this._apiKey = cfg.apiKey || dflt.apiKey;    
-        this._maxBatchingTime = cfg.maxBatchingTime || dflt.maxBatchingTime;
-        this._eventSizeLimit = cfg.eventSizeLimit || dflt.eventSizeLimit;
-        this._batchSizeLimit = cfg.batchSizeLimit || dflt.batchSizeLimit;
-        this._requestTimeout = cfg.requestTimeout || dflt.requestTimeout;
-        this._onError = cfg.onError || dflt.onError;
+        this._apiKey = cfg.apiKey;
+        this._maxBatchingTime = cfg.maxBatchingTime;
+        this._eventSizeLimit = cfg.eventSizeLimit;
+        this._batchSizeLimit = cfg.batchSizeLimit;
+        this._requestTimeout = cfg.requestTimeout;
+        this._onError = cfg.onError;
         this._queue = [];
         this._timer = null;
         this._closed = false;
         this._activeShipper = null;
         this._onRemoteConfigChange = cfg.onRemoteConfigChange || null;
         this._lastRemoteConfig = null;
+        if(cfg.useKeepAliveAgent) {
+            // Define custom agent to optimize socket utilization
+            if (this._endpoint.protocol === 'https:') {
+                this._keepaliveAgent = new HttpsAgent({
+                    maxCachedSessions: cfg.maxCachedSessions,
+                    maxSockets: cfg.maxSockets,
+                    maxFreeSockets: cfg.maxFreeSockets,
+                    maxTotalSockets: cfg.maxTotalSockets,
+                    timeout: cfg.timeout,
+                    freeSocketTimeout: cfg.freeSocketTimeout,
+                    keepAliveMsecs: cfg.keepAliveMsecs
+                });
+            } else {
+                this._keepaliveAgent = new HttpAgent({
+                    maxSockets: cfg.maxSockets,
+                    maxFreeSockets: cfg.maxFreeSockets,
+                    maxTotalSockets: cfg.maxTotalSockets,
+                    timeout: cfg.timeout,
+                    freeSocketTimeout: cfg.freeSocketTimeout,
+                    keepAliveMsecs: cfg.keepAliveMsecs
+                });
+            }
+        }
     }
 
     // Flush events queued at the time of the call, and wait for pending writes to complete
@@ -58,7 +94,7 @@ class SeqLogger {
     // A browser only function that queues events for sending using the
     // navigator.sendBeacon() API.  This may work in an unload or pagehide event
     // handler when a normal flush() would not.
-    // Events over 63K in length are discarded (with a warning sent in its place) 
+    // Events over 63K in length are discarded (with a warning sent in its place)
     // and the total size batch will be no more than 63K in length.
     flushToBeacon() {
         if (this._queue.length === 0) {
@@ -90,10 +126,10 @@ class SeqLogger {
         if (this._closed) {
             throw new Error('The logger has already been closed.');
         }
-        
+
         this._closed = true;
         this._clearTimer();
-        
+
         return this.flush();
     }
 
@@ -116,13 +152,13 @@ class SeqLogger {
         if (this._timer !== null) {
             return;
         }
-        
+
         this._timer = setTimeout(() => {
             this._timer = null;
             this._onTimer();
         }, this._maxBatchingTime);
     }
-    
+
     _clearTimer() {
         if (this._timer !== null) {
             clearTimeout(this._timer);
@@ -145,7 +181,7 @@ class SeqLogger {
             Properties: event.properties // Missing is fine
         };
     }
-    
+
     _eventTooLargeErrorEvent(event) {
         return {
             Timestamp: event.Timestamp,
@@ -153,12 +189,12 @@ class SeqLogger {
             MessageTemplate: "(Event too large) {initial}...",
             Properties: {
                 initial: event.MessageTemplate.substring(0, 12),
-                sourceContext: "Seq Javascript Client", 
+                sourceContext: "Seq Javascript Client",
                 eventSizeLimit: this._eventSizeLimit
             }
         };
     }
-    
+
     _reset(shipper) {
         if (this._activeShipper === shipper) {
             this._activeShipper = null;
@@ -167,12 +203,12 @@ class SeqLogger {
             }
         }
     }
-    
+
     _ship() {
         if (this._queue.length === 0) {
             return Promise.resolve(false);
         }
-        
+
         let wait = this._activeShipper || Promise.resolve(false);
         let shipper = this._activeShipper = wait
             .then(() => {
@@ -193,7 +229,7 @@ class SeqLogger {
 
         return shipper;
     }
-    
+
     _sendBatch() {
         if (this._queue.length === 0) {
             return Promise.resolve(true);
@@ -201,7 +237,7 @@ class SeqLogger {
 
         let dequeued = this._dequeBatch();
         let drained = this._queue.length === 0;
-        return this._post(dequeued.batch, dequeued.bytes).then(() => drained);        
+        return this._post(dequeued.batch, dequeued.bytes).then(() => drained);
     }
 
     _dequeBatch() {
@@ -233,26 +269,26 @@ class SeqLogger {
                 json = JSON.stringify(next);
                 jsonLen = Buffer.byteLength(json, 'utf8');
             }
-            
+
             // Always try to send a batch of at least one event, even if the batch size is
             // tiny.
             if (i !== 0 && bytes + jsonLen + delimSize > this._batchSizeLimit) {
                 break;
             }
-            
+
             i = i + 1;
             bytes += jsonLen + delimSize;
             delimSize = 1; // ","
             batch.push(json);
         }
-        
+
         this._queue.splice(0, i);
         return {batch, bytes};
     }
-    
+
     _post(batch, bytes) {
         return new Promise((resolve, reject) => {
-            var opts = {
+            const opts = {
                 host: this._endpoint.hostname,
                 port: this._endpoint.port,
                 path: this._endpoint.path,
@@ -262,9 +298,10 @@ class SeqLogger {
                     'Content-Type': 'application/json',
                     'Content-Length': bytes
                 },
-                timeout: this._requestTimeout
+                timeout: this._requestTimeout,
+                agent: this._keepaliveAgent
             };
-            
+
             if (this._apiKey) {
                 opts.headers["X-Seq-ApiKey"] = this._apiKey;
             }
@@ -278,21 +315,21 @@ class SeqLogger {
                     reject('HTTP log shipping failed, reached timeout (' + this._requestTimeout + ' ms)')
                 })
             });
-            
+
             req.on('response', res => {
                 var httpErr = null;
                 if (res.statusCode !== 200 && res.statusCode !== 201) {
                     httpErr = 'HTTP log shipping failed: ' + res.statusCode;
                 }
-                
+
                 res.on('data', (buffer) => {
-                    let dataRaw = buffer.toString(); 
+                    let dataRaw = buffer.toString();
 
                     if(this._onRemoteConfigChange && this._lastRemoteConfig !== dataRaw){
                         this._lastRemoteConfig = dataRaw;
                         this._onRemoteConfigChange(JSON.parse(dataRaw));
                     }
-                });           
+                });
 
                 res.on('error', e => {
                     reject(e);
@@ -301,17 +338,17 @@ class SeqLogger {
                     if (httpErr !== null) {
                         reject(httpErr);
                     } else {
-                        resolve(true); 
+                        resolve(true);
                     }
                 });
             });
-            
+
             req.on('error', e => {
                 reject(e);
             });
 
-            req.write(HEADER);           
-            var delim = ""; 
+            req.write(HEADER);
+            var delim = "";
             for (var b = 0; b < batch.length; b++) {
                 req.write(delim);
                 delim = ",";
@@ -322,14 +359,14 @@ class SeqLogger {
         });
     }
 
-    _prepForBeacon(dequeued) {        
+    _prepForBeacon(dequeued) {
         const {batch, bytes} = dequeued;
 
         const dataParts = [HEADER, batch.join(','), FOOTER];
 
         // CORS-safelisted for the Content-Type request header
         const options = {type: 'text/plain'};
-        
+
         const endpointWithKey = Object.assign({}, this._endpoint, {query: {'apiKey': this._apiKey}});
 
         return {
@@ -360,7 +397,7 @@ const removeCirculars = (obj, branch = new Map(), path = "root") => {
     else {
         branch.set(obj, path);
     }
-    
+
     if (obj instanceof Array) {
         return obj.map((value, i) =>
             isValue(value) ? value : removeCirculars(value, new Map(branch), path + `[${i}]`)
