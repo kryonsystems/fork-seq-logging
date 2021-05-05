@@ -1,5 +1,5 @@
 {
-  "name": "seq-logging",
+  "name": "@kryonsystems/seq-logging",
   "version": "0.5.1",
   "description": "Sends structured log events to the Seq HTTP ingestion API",
   "keywords": [
@@ -14,9 +14,12 @@
   "author": "Datalust and contributors",
   "license": "Apache-2.0",
   "homepage": "https://github.com/continuousit/seq-logging",
-  "repository": {
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com/"
+  },
+   "repository": {
     "type": "git",
-    "url": "https://github.com/continuousit/seq-logging.git"
+    "url": "ssh://git@github.com/kryonsystems/fork-seq-logging.git"
   },
   "devDependencies": {
     "mocha": "^7.2.0",
