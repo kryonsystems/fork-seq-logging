@@ -1,6 +1,6 @@
 {
   "name": "@kryonsystems/seq-logging",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Sends structured log events to the Seq HTTP ingestion API",
   "keywords": [
     "seq",
@@ -17,7 +17,7 @@
   "publishConfig": {
     "registry": "https://npm.pkg.github.com/"
   },
-   "repository": {
+  "repository": {
     "type": "git",
     "url": "ssh://git@github.com/kryonsystems/fork-seq-logging.git"
   },

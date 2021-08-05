@@ -264,7 +264,7 @@ class SeqLogger {
             }
             var jsonLen = Buffer.byteLength(json, 'utf8');
             if (jsonLen > this._eventSizeLimit) {
-                this._onError("[seq] Event body is larger than " + this._eventSizeLimit + " bytes: " + json);
+                this._onError("[seq] Event body is larger than " + this._eventSizeLimit + " bytes: " + jsonLen);
                 this._queue[i] = next = this._eventTooLargeErrorEvent(next);
                 json = JSON.stringify(next);
                 jsonLen = Buffer.byteLength(json, 'utf8');
