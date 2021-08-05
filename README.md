@@ -2,6 +2,11 @@
 
 > This library makes it easy to support Seq from Node.js logging libraries, including [Pino](https://github.com/pinojs/pino) via [`pino-seq`](https://github.com/datalust/pino-seq), [Bunyan](https://github.com/trentm/node-bunyan) via [`bunyan-seq`](https://github.com/continuousit/bunyan-seq), and [Ts.ED logger](https://logger.tsed.io) via [@tsed/logger-seq](https://logger.tsed.io/appenders/seq.html). It is not expected that applications will interact directly with this package.
 
+## Kryon Publish after changes
+```
+npm publish
+```
+
 ### Usage
 
 A `Logger` is configured with `serverUrl`, and optionally `apiKey` as well as event and batch size limits.
