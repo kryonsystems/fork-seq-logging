@@ -309,11 +309,15 @@ class SeqLogger {
             let requestFactory = opts.protocol === 'https:' ? https : http;
             let req = requestFactory.request(opts);
 
+            let localSocket
+            const handleTimeout = () => {
+                req.abort();
+                reject('HTTP log shipping failed, reached timeout (' + this._requestTimeout + ' ms)')
+            }
+
             req.on("socket", (socket) => {
-                socket.on("timeout", () => {
-                    req.abort();
-                    reject('HTTP log shipping failed, reached timeout (' + this._requestTimeout + ' ms)')
-                })
+                localSocket = socket
+                socket.on("timeout", handleTimeout)
             });
 
             req.on('response', res => {
@@ -340,11 +344,14 @@ class SeqLogger {
                     } else {
                         resolve(true);
                     }
+
+                    localSocket?.off("timeout", handleTimeout)
                 });
             });
 
             req.on('error', e => {
                 reject(e);
+                localSocket?.off("timeout", handleTimeout)
             });
 
             req.write(HEADER);
